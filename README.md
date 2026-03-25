@@ -38,3 +38,7 @@ The initial client assumes an OpenAI-compatible endpoint:
 - server-sent event frames using `data:`
 
 If your Llama ROCm server differs, adjust the transport in `src/client.rs`.
+
+## Roadmap
+
+Planned future work includes model-template awareness, where `tinychat` can inspect or track each model's chat template, infer model-specific prompt behavior, and detect when that template changes after an upgrade. That is intentionally deferred until the core local chat and profile-tuning loop is stable.
