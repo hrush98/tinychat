@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde_json::Value;
 
-use crate::config::ServerConfig;
+use crate::config::{AppConfig, BackendFlavor, BackendType};
 use crate::profiles::InferenceProfile;
 use crate::session::ChatMessage;
 
@@ -64,35 +65,50 @@ struct ChatTemplateKwargs {
     enable_thinking: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct StreamChunk {
-    model: Option<String>,
-    choices: Vec<StreamChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StreamChoice {
-    delta: StreamDelta,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct StreamDelta {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-}
-
 pub struct ModelClient {
     http: Client,
-    server: ServerConfig,
+    config: AppConfig,
 }
 
 impl ModelClient {
-    pub fn new(server: ServerConfig) -> Result<Self> {
+    pub fn new(config: AppConfig) -> Result<Self> {
         let http = Client::builder()
-            .timeout(Duration::from_secs(server.timeout_secs))
+            .timeout(Duration::from_secs(config.server.timeout_secs))
             .build()
             .context("failed to build HTTP client")?;
-        Ok(Self { http, server })
+        Ok(Self { http, config })
+    }
+
+    pub fn resolve_thinking_preference(&self, profile: &InferenceProfile) -> Option<bool> {
+        profile.prefer_thinking
+    }
+
+    pub fn supports_trace_stream(&self) -> bool {
+        self.config.model.supports_reasoning && self.config.model.reasoning_field.is_some()
+    }
+
+    pub fn trace_field_label(&self) -> &str {
+        self.config
+            .model
+            .reasoning_field
+            .as_deref()
+            .unwrap_or("none")
+    }
+
+    pub fn template_path_label(&self) -> &str {
+        self.config
+            .model
+            .chat_template_path
+            .as_deref()
+            .unwrap_or("none")
+    }
+
+    pub fn thinking_toggle_mode_label(&self) -> &'static str {
+        match self.config.model.thinking_toggle_path.as_deref() {
+            Some("chat_template_kwargs.enable_thinking") => "chat_template_kwargs.enable_thinking",
+            Some(_) => "unsupported",
+            None => "unavailable",
+        }
     }
 
     pub async fn chat_streaming<F>(
@@ -107,10 +123,10 @@ impl ModelClient {
         let effective_model = profile
             .model
             .clone()
-            .unwrap_or_else(|| self.server.default_model.clone());
+            .unwrap_or_else(|| self.config.server.default_model.clone());
         let url = format!(
             "{}/chat/completions",
-            self.server.base_url.trim_end_matches('/')
+            self.config.server.base_url.trim_end_matches('/')
         );
         let request = ChatCompletionRequest {
             model: &effective_model,
@@ -119,9 +135,7 @@ impl ModelClient {
             top_p: profile.top_p,
             max_tokens: profile.max_tokens,
             stream: profile.stream,
-            chat_template_kwargs: profile
-                .enable_thinking
-                .map(|enable_thinking| ChatTemplateKwargs { enable_thinking }),
+            chat_template_kwargs: self.build_chat_template_kwargs(profile),
         };
 
         let started_at = Instant::now();
@@ -154,25 +168,34 @@ impl ModelClient {
                 if payload == "[DONE]" || payload.is_empty() {
                     continue;
                 }
-                let parsed: StreamChunk = serde_json::from_str(payload)
+                let parsed: Value = serde_json::from_str(payload)
                     .with_context(|| format!("failed to parse streaming payload: {payload}"))?;
                 if seen_model.is_none() {
-                    seen_model = parsed.model.clone();
+                    seen_model = parsed
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
                 }
-                for choice in parsed.choices {
-                    if let Some(delta) = choice.delta.reasoning_content {
-                        if first_reasoning_at.is_none() {
-                            first_reasoning_at = Some(Instant::now());
+
+                if let Some(choices) = parsed.get("choices").and_then(Value::as_array) {
+                    for choice in choices {
+                        let Some(delta) = choice.get("delta") else {
+                            continue;
+                        };
+                        if let Some(reasoning_delta) = self.extract_reasoning_delta(delta) {
+                            if first_reasoning_at.is_none() {
+                                first_reasoning_at = Some(Instant::now());
+                            }
+                            on_event(StreamEvent::Reasoning(&reasoning_delta));
+                            reasoning_content.push_str(&reasoning_delta);
                         }
-                        on_event(StreamEvent::Reasoning(&delta));
-                        reasoning_content.push_str(&delta);
-                    }
-                    if let Some(delta) = choice.delta.content {
-                        if first_content_at.is_none() {
-                            first_content_at = Some(Instant::now());
+                        if let Some(content_delta) = delta.get("content").and_then(Value::as_str) {
+                            if first_content_at.is_none() {
+                                first_content_at = Some(Instant::now());
+                            }
+                            on_event(StreamEvent::Content(content_delta));
+                            content.push_str(content_delta);
                         }
-                        on_event(StreamEvent::Content(&delta));
-                        content.push_str(&delta);
                     }
                 }
             }
@@ -190,5 +213,43 @@ impl ModelClient {
             },
             effective_model: seen_model.unwrap_or(effective_model),
         })
+    }
+
+    fn build_chat_template_kwargs(&self, profile: &InferenceProfile) -> Option<ChatTemplateKwargs> {
+        if !self.config.model.supports_thinking_toggle {
+            return None;
+        }
+
+        let prefer_thinking = profile.prefer_thinking?;
+        match self.config.model.thinking_toggle_path.as_deref() {
+            Some("chat_template_kwargs.enable_thinking") => Some(ChatTemplateKwargs {
+                enable_thinking: prefer_thinking,
+            }),
+            _ => None,
+        }
+    }
+
+    fn extract_reasoning_delta(&self, delta: &Value) -> Option<String> {
+        if !self.config.model.supports_reasoning {
+            return None;
+        }
+
+        let field = self.config.model.reasoning_field.as_deref()?;
+        delta
+            .get(field)
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    }
+
+    pub fn backend_label(&self) -> &'static str {
+        match (
+            &self.config.backend.backend_type,
+            &self.config.backend.flavor,
+        ) {
+            (BackendType::OpenAiCompatible, BackendFlavor::Generic) => "openai_compatible/generic",
+            (BackendType::OpenAiCompatible, BackendFlavor::Llamacpp) => {
+                "openai_compatible/llamacpp"
+            }
+        }
     }
 }

@@ -15,6 +15,50 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub enum BackendType {
+    #[serde(rename = "openai_compatible")]
+    OpenAiCompatible,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub enum BackendFlavor {
+    #[serde(rename = "generic")]
+    Generic,
+    #[serde(rename = "llamacpp")]
+    Llamacpp,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BackendConfig {
+    #[serde(rename = "type")]
+    pub backend_type: BackendType,
+    #[serde(default = "default_backend_flavor")]
+    pub flavor: BackendFlavor,
+}
+
+fn default_backend_flavor() -> BackendFlavor {
+    BackendFlavor::Generic
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelConfig {
+    #[serde(default = "default_supports_reasoning")]
+    pub supports_reasoning: bool,
+    #[serde(default)]
+    pub reasoning_field: Option<String>,
+    #[serde(default)]
+    pub supports_thinking_toggle: bool,
+    #[serde(default)]
+    pub thinking_toggle_path: Option<String>,
+    #[serde(default)]
+    pub chat_template_path: Option<String>,
+}
+
+fn default_supports_reasoning() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AppSettings {
     pub default_profile: ProfileName,
     #[serde(default)]
@@ -24,6 +68,8 @@ pub struct AppSettings {
 #[derive(Debug, Clone, Deserialize)]
 struct RawConfig {
     pub server: ServerConfig,
+    pub backend: BackendConfig,
+    pub model: ModelConfig,
     pub app: AppSettings,
     pub profiles: BTreeMap<ProfileName, InferenceProfile>,
 }
@@ -31,6 +77,8 @@ struct RawConfig {
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub server: ServerConfig,
+    pub backend: BackendConfig,
+    pub model: ModelConfig,
     pub app: AppSettings,
     pub profiles: BTreeMap<ProfileName, InferenceProfile>,
 }
@@ -48,8 +96,12 @@ impl AppConfig {
             );
         }
 
+        validate_model_config(&parsed.model)?;
+
         Ok(Self {
             server: parsed.server,
+            backend: parsed.backend,
+            model: parsed.model,
             app: parsed.app,
             profiles: parsed.profiles,
         })
@@ -60,4 +112,26 @@ impl AppConfig {
             .get(name)
             .with_context(|| format!("profile '{}' is not configured", name.as_str()))
     }
+}
+
+fn validate_model_config(model: &ModelConfig) -> Result<()> {
+    if model.supports_reasoning && model.reasoning_field.is_none() {
+        bail!("model.supports_reasoning=true requires model.reasoning_field")
+    }
+
+    if model.supports_thinking_toggle && model.thinking_toggle_path.is_none() {
+        bail!("model.supports_thinking_toggle=true requires model.thinking_toggle_path")
+    }
+
+    if let Some(path) = &model.thinking_toggle_path {
+        match path.as_str() {
+            "chat_template_kwargs.enable_thinking" => {}
+            _ => bail!(
+                "unsupported model.thinking_toggle_path '{}' ; currently only 'chat_template_kwargs.enable_thinking' is supported",
+                path
+            ),
+        }
+    }
+
+    Ok(())
 }

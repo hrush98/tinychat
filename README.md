@@ -12,11 +12,12 @@
 - placeholder `tool` and `agent` profiles
 - debug output for router decisions and latency
 - optional streamed reasoning trace display
+- manual backend and model compatibility configuration
 
 ## Quick start
 
 1. Copy `config/tinychat.example.toml` to `config/tinychat.toml`.
-2. Set the base URL and default model for your local server.
+2. Set the `server`, `backend`, and `model` sections for your setup.
 3. Run `cargo run -- --config config/tinychat.toml`.
 
 ## Commands
@@ -33,6 +34,15 @@
 - `/trace on`
 - `/trace off`
 
+## Config Model
+
+`tinychat` now separates configuration into four concerns:
+
+- `server`: where the backend lives
+- `backend`: how the server speaks
+- `model`: reasoning and compatibility behavior
+- `profiles`: user intent such as `direct` or `reasoning`
+
 ## Protocol
 
 The initial client assumes an OpenAI-compatible endpoint:
@@ -40,9 +50,9 @@ The initial client assumes an OpenAI-compatible endpoint:
 - `POST /v1/chat/completions`
 - streaming enabled
 - server-sent event frames using `data:`
-- optional reasoning deltas via `reasoning_content`
+- optional reasoning deltas via a configurable reasoning field
 
-If your Llama ROCm server differs, adjust the transport in `src/client.rs`.
+If your backend differs, adjust the compatibility config first and the transport code second.
 
 ## Roadmap
 

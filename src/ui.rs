@@ -28,13 +28,19 @@ const MAGENTA: &str = "\x1b[35m";
 const RED: &str = "\x1b[31m";
 
 pub async fn run_repl(config: AppConfig) -> Result<()> {
-    let client = ModelClient::new(config.server.clone())?;
+    let client = ModelClient::new(config.clone())?;
     let mut session = Session::new();
     let mut debug = config.app.debug;
     let mut profile_override: Option<ProfileName> = None;
     let mut show_trace = false;
 
-    print_banner(&config, debug, show_trace, profile_override.as_ref());
+    print_banner(
+        &config,
+        &client,
+        debug,
+        show_trace,
+        profile_override.as_ref(),
+    );
 
     let stdin = io::stdin();
     let mut input = String::new();
@@ -75,15 +81,16 @@ pub async fn run_repl(config: AppConfig) -> Result<()> {
         let profile = config.profile(&route.profile)?;
         if debug {
             println!(
-                "{}{DIM}[router]{} profile={} reasoning={} enable_thinking={} reason={}",
+                "{}{DIM}[router]{} profile={} reasoning={} prefer_thinking={} toggle_mode={} reason={}",
                 YELLOW,
                 RESET,
                 route.profile,
                 profile.reasoning,
-                profile
-                    .enable_thinking
+                client
+                    .resolve_thinking_preference(profile)
                     .map(|value| value.to_string())
-                    .unwrap_or_else(|| "server-default".to_string()),
+                    .unwrap_or_else(|| "none".to_string()),
+                client.thinking_toggle_mode_label(),
                 route.reason
             );
         }
@@ -168,6 +175,7 @@ pub async fn run_repl(config: AppConfig) -> Result<()> {
 
 fn print_banner(
     config: &AppConfig,
+    client: &ModelClient,
     debug: bool,
     show_trace: bool,
     profile_override: Option<&ProfileName>,
@@ -176,10 +184,12 @@ fn print_banner(
     println!("{}{DIM}local and self-hosted model chat{}", CYAN, RESET);
     println!();
     println!(
-        "{}{DIM}server={} model={} default_profile={} debug={} trace={} override={}{}",
+        "{}{DIM}server={} backend={} model={} trace_field={} default_profile={} debug={} trace={} override={}{}",
         BLUE,
         config.server.base_url,
+        client.backend_label(),
         config.server.default_model,
+        client.trace_field_label(),
         config.app.default_profile,
         debug,
         if show_trace { "on" } else { "off" },
@@ -187,6 +197,14 @@ fn print_banner(
         RESET
     );
     println!("{}{DIM}type /help for commands{}", BLUE, RESET);
+    println!(
+        "{}{DIM}template={} toggle_mode={} trace_supported={}{}",
+        BLUE,
+        client.template_path_label(),
+        client.thinking_toggle_mode_label(),
+        client.supports_trace_stream(),
+        RESET
+    );
 }
 
 fn handle_command(

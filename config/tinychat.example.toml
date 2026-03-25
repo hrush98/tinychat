@@ -3,6 +3,17 @@ base_url = "http://127.0.0.1:8080/v1"
 default_model = "qwen122b-a10"
 timeout_secs = 300
 
+[backend]
+type = "openai_compatible"
+flavor = "llamacpp"
+
+[model]
+supports_reasoning = true
+reasoning_field = "reasoning_content"
+supports_thinking_toggle = true
+thinking_toggle_path = "chat_template_kwargs.enable_thinking"
+chat_template_path = "/path/to/chat_template.jinja"
+
 [app]
 default_profile = "direct"
 debug = true
@@ -14,7 +25,7 @@ top_p = 0.9
 max_tokens = 1024
 stream = true
 reasoning = false
-enable_thinking = false
+prefer_thinking = false
 
 [profiles.reasoning]
 system_prompt = "You are a careful assistant. Think through the problem methodically and explain your reasoning clearly."
@@ -23,7 +34,7 @@ top_p = 0.95
 max_tokens = 2048
 stream = true
 reasoning = true
-enable_thinking = true
+prefer_thinking = true
 
 [profiles.tool]
 system_prompt = "You are a tool-capable assistant."
@@ -32,7 +43,7 @@ top_p = 0.9
 max_tokens = 1024
 stream = true
 reasoning = false
-enable_thinking = false
+prefer_thinking = false
 
 [profiles.agent]
 system_prompt = "You are an agent-oriented assistant."
@@ -41,4 +52,4 @@ top_p = 0.95
 max_tokens = 2048
 stream = true
 reasoning = true
-enable_thinking = true
+prefer_thinking = true

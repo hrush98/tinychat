@@ -54,7 +54,7 @@ pub struct InferenceProfile {
     #[serde(default)]
     pub reasoning: bool,
     #[serde(default)]
-    pub enable_thinking: Option<bool>,
+    pub prefer_thinking: Option<bool>,
     #[serde(default)]
     pub model: Option<String>,
 }
