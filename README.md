@@ -1,6 +1,6 @@
 # tinychat
 
-`tinychat` is a lightweight terminal chat router for local model servers.
+`tinychat` is a lightweight terminal chat router and tuning workbench for local and self-hosted language models.
 
 ## Current status
 
@@ -11,6 +11,7 @@
 - rules-based routing between `direct` and `reasoning`
 - placeholder `tool` and `agent` profiles
 - debug output for router decisions and latency
+- optional streamed reasoning trace display
 
 ## Quick start
 
@@ -28,6 +29,9 @@
 - `/debug`
 - `/debug on`
 - `/debug off`
+- `/trace`
+- `/trace on`
+- `/trace off`
 
 ## Protocol
 
@@ -36,6 +40,7 @@ The initial client assumes an OpenAI-compatible endpoint:
 - `POST /v1/chat/completions`
 - streaming enabled
 - server-sent event frames using `data:`
+- optional reasoning deltas via `reasoning_content`
 
 If your Llama ROCm server differs, adjust the transport in `src/client.rs`.
 

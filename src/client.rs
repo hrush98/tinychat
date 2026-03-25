@@ -12,7 +12,8 @@ use crate::session::ChatMessage;
 #[derive(Debug)]
 pub struct ResponseMetrics {
     pub started_at: Instant,
-    pub first_token_at: Option<Instant>,
+    pub first_reasoning_at: Option<Instant>,
+    pub first_content_at: Option<Instant>,
     pub finished_at: Instant,
 }
 
@@ -21,8 +22,13 @@ impl ResponseMetrics {
         self.finished_at.duration_since(self.started_at)
     }
 
+    pub fn first_reasoning_latency(&self) -> Option<Duration> {
+        self.first_reasoning_at
+            .map(|first| first.duration_since(self.started_at))
+    }
+
     pub fn first_token_latency(&self) -> Option<Duration> {
-        self.first_token_at
+        self.first_content_at
             .map(|first| first.duration_since(self.started_at))
     }
 }
@@ -30,8 +36,15 @@ impl ResponseMetrics {
 #[derive(Debug)]
 pub struct ChatResponse {
     pub content: String,
+    pub reasoning_content: String,
     pub metrics: ResponseMetrics,
     pub effective_model: String,
+}
+
+#[derive(Debug)]
+pub enum StreamEvent<'a> {
+    Reasoning(&'a str),
+    Content(&'a str),
 }
 
 #[derive(Debug, Serialize)]
@@ -42,6 +55,13 @@ struct ChatCompletionRequest<'a> {
     top_p: f32,
     max_tokens: u32,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<ChatTemplateKwargs>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatTemplateKwargs {
+    enable_thinking: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +78,7 @@ struct StreamChoice {
 #[derive(Debug, Default, Deserialize)]
 struct StreamDelta {
     content: Option<String>,
+    reasoning_content: Option<String>,
 }
 
 pub struct ModelClient {
@@ -78,10 +99,10 @@ impl ModelClient {
         &self,
         profile: &InferenceProfile,
         messages: &[ChatMessage],
-        mut on_token: F,
+        mut on_event: F,
     ) -> Result<ChatResponse>
     where
-        F: FnMut(&str),
+        F: FnMut(StreamEvent<'_>),
     {
         let effective_model = profile
             .model
@@ -98,6 +119,9 @@ impl ModelClient {
             top_p: profile.top_p,
             max_tokens: profile.max_tokens,
             stream: profile.stream,
+            chat_template_kwargs: profile
+                .enable_thinking
+                .map(|enable_thinking| ChatTemplateKwargs { enable_thinking }),
         };
 
         let started_at = Instant::now();
@@ -113,7 +137,9 @@ impl ModelClient {
 
         let mut stream = response.bytes_stream();
         let mut content = String::new();
-        let mut first_token_at = None;
+        let mut reasoning_content = String::new();
+        let mut first_reasoning_at = None;
+        let mut first_content_at = None;
         let mut seen_model = None;
 
         while let Some(chunk) = stream.next().await {
@@ -134,11 +160,18 @@ impl ModelClient {
                     seen_model = parsed.model.clone();
                 }
                 for choice in parsed.choices {
-                    if let Some(delta) = choice.delta.content {
-                        if first_token_at.is_none() {
-                            first_token_at = Some(Instant::now());
+                    if let Some(delta) = choice.delta.reasoning_content {
+                        if first_reasoning_at.is_none() {
+                            first_reasoning_at = Some(Instant::now());
                         }
-                        on_token(&delta);
+                        on_event(StreamEvent::Reasoning(&delta));
+                        reasoning_content.push_str(&delta);
+                    }
+                    if let Some(delta) = choice.delta.content {
+                        if first_content_at.is_none() {
+                            first_content_at = Some(Instant::now());
+                        }
+                        on_event(StreamEvent::Content(&delta));
                         content.push_str(&delta);
                     }
                 }
@@ -148,9 +181,11 @@ impl ModelClient {
         let finished_at = Instant::now();
         Ok(ChatResponse {
             content,
+            reasoning_content,
             metrics: ResponseMetrics {
                 started_at,
-                first_token_at,
+                first_reasoning_at,
+                first_content_at,
                 finished_at,
             },
             effective_model: seen_model.unwrap_or(effective_model),

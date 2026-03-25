@@ -14,6 +14,7 @@ top_p = 0.9
 max_tokens = 1024
 stream = true
 reasoning = false
+enable_thinking = false
 
 [profiles.reasoning]
 system_prompt = "You are a careful assistant. Think through the problem methodically and explain your reasoning clearly."
@@ -22,6 +23,7 @@ top_p = 0.95
 max_tokens = 2048
 stream = true
 reasoning = true
+enable_thinking = true
 
 [profiles.tool]
 system_prompt = "You are a tool-capable assistant."
@@ -30,6 +32,7 @@ top_p = 0.9
 max_tokens = 1024
 stream = true
 reasoning = false
+enable_thinking = false
 
 [profiles.agent]
 system_prompt = "You are an agent-oriented assistant."
@@ -38,3 +41,4 @@ top_p = 0.95
 max_tokens = 2048
 stream = true
 reasoning = true
+enable_thinking = true
