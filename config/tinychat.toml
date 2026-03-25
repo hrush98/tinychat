@@ -1,0 +1,40 @@
+[server]
+base_url = "http://127.0.0.1:8080/v1"
+default_model = "qwen122b-a10"
+timeout_secs = 300
+
+[app]
+default_profile = "direct"
+debug = true
+
+[profiles.direct]
+system_prompt = "You are a concise, direct assistant tuned for fast local inference."
+temperature = 0.2
+top_p = 0.9
+max_tokens = 1024
+stream = true
+reasoning = false
+
+[profiles.reasoning]
+system_prompt = "You are a careful assistant. Think through the problem methodically and explain your reasoning clearly."
+temperature = 0.4
+top_p = 0.95
+max_tokens = 2048
+stream = true
+reasoning = true
+
+[profiles.tool]
+system_prompt = "You are a tool-capable assistant."
+temperature = 0.2
+top_p = 0.9
+max_tokens = 1024
+stream = true
+reasoning = false
+
+[profiles.agent]
+system_prompt = "You are an agent-oriented assistant."
+temperature = 0.3
+top_p = 0.95
+max_tokens = 2048
+stream = true
+reasoning = true
